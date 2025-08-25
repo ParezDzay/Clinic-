@@ -15,9 +15,9 @@ def load_bookings() -> pd.DataFrame:
     """Load CSV or create empty DataFrame if it doesn't exist."""
     if CSV_FILE.exists():
         df = pd.read_csv(CSV_FILE)
-        df["Appt_Date"] = pd.to_datetime(df["Appt_Date"], errors="coerce")
+        df["Appointment Date"] = pd.to_datetime(df["Appointment Date"], errors="coerce")
     else:
-        df = pd.DataFrame(columns=["Appt_Name", "Appt_Date", "Appt_Time", "Payment"])
+        df = pd.DataFrame(columns=["Patient Name", "Appointment Date", "Appointment Time (manual)", "Payment"])
         df.to_csv(CSV_FILE, index=False)
     return df
 
@@ -36,47 +36,46 @@ def safe_rerun():
     else:
         st.stop()
 
-# ---------- Upcoming & Archive Tabs ----------
+# ---------- Tabs for Appointments ----------
 tabs = st.tabs(["📌 Upcoming Appointments", "📂 Appointment Archive"])
 
 # Tab: Upcoming Appointments
 with tabs[0]:
     bookings = load_bookings()
     yesterday = pd.Timestamp(date.today() - timedelta(days=1))
-    upcoming = bookings[bookings["Appt_Date"] > yesterday]
+    upcoming = bookings[bookings["Appointment Date"] > yesterday]
 
     st.subheader("📌 Upcoming Appointments")
     if upcoming.empty:
         st.info("No upcoming appointments.")
     else:
-        # Show each day in an expander, recent days first
-        disp = upcoming.sort_values("Appt_Date", ascending=False)
-        for d in disp["Appt_Date"].dt.date.unique():
-            day_df = disp[disp["Appt_Date"].dt.date == d]
+        disp = upcoming.sort_values("Appointment Date", ascending=False)
+        for d in disp["Appointment Date"].dt.date.unique():
+            day_df = disp[disp["Appointment Date"].dt.date == d]
             with st.expander(d.strftime("📅 %A, %d %B %Y")):
-                day_disp = day_df[["Appt_Name", "Appt_Time", "Payment"]].reset_index(drop=True)
+                day_disp = day_df[["Patient Name", "Appointment Time (manual)", "Payment"]].reset_index(drop=True)
                 day_disp.index = range(1, len(day_disp)+1)
                 st.dataframe(day_disp, use_container_width=True)
 
 # Tab: Archived Appointments
 with tabs[1]:
     bookings = load_bookings()
-    archive = bookings[bookings["Appt_Date"] <= yesterday]
+    archive = bookings[bookings["Appointment Date"] <= yesterday]
 
     st.subheader("📂 Appointment Archive")
     if archive.empty:
         st.info("No archived appointments.")
     else:
-        disp = archive.sort_values("Appt_Date", ascending=False).reset_index(drop=True)
+        disp = archive.sort_values("Appointment Date", ascending=False).reset_index(drop=True)
         disp.index += 1
-        st.dataframe(disp[["Appt_Date", "Appt_Name", "Appt_Time", "Payment"]], use_container_width=True)
+        st.dataframe(disp[["Appointment Date", "Patient Name", "Appointment Time (manual)", "Payment"]], use_container_width=True)
 
 # ---------- Sidebar: Add Appointment ----------
 st.sidebar.header("Add Appointment")
 picked_date = st.sidebar.date_input("Appointment Date", value=date.today())
 appt_name = st.sidebar.text_input("Patient Name")
 appt_time = st.sidebar.text_input("Appointment Time (manual)")
-payment = st.sidebar.text_input("Payment")
+payment = st.sidebar.text_input("Payment (optional)")
 
 if st.sidebar.button("💾 Save Appointment"):
     if not appt_name:
@@ -85,9 +84,9 @@ if st.sidebar.button("💾 Save Appointment"):
         st.sidebar.error("Appointment time required.")
     else:
         record = {
-            "Appt_Name": appt_name.strip(),
-            "Appt_Date": picked_date.isoformat(),
-            "Appt_Time": appt_time.strip(),
+            "Patient Name": appt_name.strip(),
+            "Appointment Date": picked_date.isoformat(),
+            "Appointment Time (manual)": appt_time.strip(),
             "Payment": payment.strip()
         }
         append_booking(record)
