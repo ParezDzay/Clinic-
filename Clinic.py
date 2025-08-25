@@ -3,78 +3,86 @@ import pandas as pd
 from datetime import date
 import os
 
-# ---------- CSV File ----------
-CSV_FILE = "/Users/parezdzay/Documents/Kawa Clinic/kawa clinic.csv"
+# CSV file path (relative to app folder)
+CSV_FILE = "kawa clinic.csv"
 
 # ---------- Data Functions ----------
 def load_bookings() -> pd.DataFrame:
-    """Load appointments from CSV"""
+    """
+    Load bookings from CSV. If file does not exist, create it.
+    """
     if not os.path.exists(CSV_FILE):
-        df = pd.DataFrame(columns=["Patient_Name","Appt_Date","Appt_Time","Payment"])
+        df = pd.DataFrame(columns=["Appt_Date","Patient_Name","Appt_Time","Payment"])
         df.to_csv(CSV_FILE, index=False)
+    df = pd.read_csv(CSV_FILE)
+    if "Appt_Date" in df.columns:
+        df["Appt_Date"] = pd.to_datetime(df["Appt_Date"], errors="coerce")
     else:
-        df = pd.read_csv(CSV_FILE)
-        if "Appt_Date" in df.columns:
-            df["Appt_Date"] = pd.to_datetime(df["Appt_Date"], errors="coerce")
-        else:
-            df["Appt_Date"] = pd.NaT
+        df["Appt_Date"] = pd.NaT
     return df
 
-def append_booking(record: dict):
-    """Append a new appointment"""
+def append_booking(rec: dict):
     df = load_bookings()
-    df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
+    df = pd.concat([df, pd.DataFrame([rec])], ignore_index=True)
     df.to_csv(CSV_FILE, index=False)
 
+# ---------- Check overlap ----------
 def check_overlap(df: pd.DataFrame, appt_date: date, appt_time: str) -> bool:
-    """Check if an appointment exists at the same date/time"""
     if df.empty:
         return False
     mask = (df["Appt_Date"].dt.date == appt_date) & (df["Appt_Time"] == appt_time)
     return mask.any()
 
-# ---------- Streamlit UI ----------
+# ---------- Safe rerun helper ----------
+def safe_rerun():
+    if hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+    elif hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.stop()
+
+# ---------- Streamlit Config ----------
 st.set_page_config(page_title="Kawa Clinic Appointments", layout="wide")
 st.title("📅 Kawa Clinic - Appointment Records")
 
 # ---------- Sidebar: Add Appointment ----------
-st.sidebar.header("➕ Add Appointment")
-with st.sidebar.form("add_appointment_form", clear_on_submit=True):
-    patient_name = st.text_input("Patient Name")
-    appt_date = st.date_input("Appointment Date", value=date.today())
-    appt_time = st.text_input("Appointment Time (manual)", placeholder="14:30")
-    payment = st.text_input("Payment")
-    submitted = st.form_submit_button("💾 Save Appointment")
+st.sidebar.header("Add Appointment")
+picked_date  = st.sidebar.date_input("Appointment Date", value=date.today())
+appt_time    = st.sidebar.text_input("Appointment Time (manual)")
+patient_name = st.sidebar.text_input("Patient Name")
+payment      = st.sidebar.text_input("Payment")
 
-    if submitted:
-        bookings = load_bookings()  # Reload before checking
-        if not patient_name or not appt_time:
-            st.sidebar.error("Patient Name and Appointment Time are required.")
-        elif check_overlap(bookings, appt_date, appt_time):
-            st.sidebar.error("An appointment already exists at this time.")
-        else:
-            append_booking({
-                "Patient_Name": patient_name.strip(),
-                "Appt_Date": appt_date,
-                "Appt_Time": appt_time.strip(),
-                "Payment": payment.strip()
-            })
-            st.sidebar.success("✅ Appointment saved successfully!")
+if st.sidebar.button("💾 Save Appointment"):
+    df = load_bookings()
+    if not patient_name or not appt_time:
+        st.sidebar.error("Patient Name and Appointment Time are required.")
+    elif check_overlap(df, picked_date, appt_time):
+        st.sidebar.error("Appointment already exists at this time.")
+    else:
+        record = {
+            "Appt_Date":    picked_date.isoformat(),
+            "Patient_Name": patient_name.strip(),
+            "Appt_Time":    appt_time.strip(),
+            "Payment":      payment.strip()
+        }
+        append_booking(record)
+        st.sidebar.success("✅ Appointment saved successfully!")
+        safe_rerun()
 
-# ---------- Load bookings for display ----------
+# ---------- Load Bookings ----------
 bookings = load_bookings()
 
 # ---------- Main Tabs ----------
 upcoming_tab, archived_tab = st.tabs(["📌 Upcoming Appointments", "📂 Archived Appointments"])
 
-# ---------- Upcoming Appointments ----------
+# Upcoming
 with upcoming_tab:
     upcoming = bookings[bookings["Appt_Date"].dt.date >= date.today()].copy()
     if upcoming.empty:
         st.info("No upcoming appointments booked.")
     else:
-        st.subheader("📌 Upcoming Appointments")
-        upcoming = upcoming.sort_values("Appt_Date", ascending=False)
+        upcoming = upcoming.sort_values("Appt_Date")
         for d in upcoming["Appt_Date"].dt.date.drop_duplicates():
             day_df = upcoming[upcoming["Appt_Date"].dt.date == d]
             with st.expander(d.strftime("📅 %A, %d %B %Y")):
@@ -82,13 +90,12 @@ with upcoming_tab:
                 df_disp.index = range(1, len(df_disp)+1)
                 st.dataframe(df_disp, use_container_width=True)
 
-# ---------- Archived Appointments ----------
+# Archived
 with archived_tab:
     archived = bookings[bookings["Appt_Date"].dt.date < date.today()].copy()
     if archived.empty:
         st.info("No archived appointments found.")
     else:
-        st.subheader("📂 Archived Appointments")
         archived = archived.sort_values("Appt_Date", ascending=False)
         for d in archived["Appt_Date"].dt.date.drop_duplicates():
             day_df = archived[archived["Appt_Date"].dt.date == d]
