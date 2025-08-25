@@ -3,92 +3,91 @@ import pandas as pd
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-# ---------- CSV Storage ----------
-CSV_FILE = Path("kawa clinic.csv")  # Local CSV file
+# ---------- CSV File Setup ----------
+BASE_DIR = Path(__file__).parent if "__file__" in globals() else Path.cwd()
+CSV_FILE = BASE_DIR / "kawaclinic.csv"
 
-# ---------- Streamlit config & Header ----------
-st.set_page_config(page_title="Kawa Clinic (Appointments)", layout="wide")
-st.title("Kawa Clinic (Appointments)")
-
-# ---------- Data Functions ----------
-def load_bookings() -> pd.DataFrame:
-    """Load CSV or create empty DataFrame if it doesn't exist."""
+# ---------- Load and Save Functions ----------
+def load_bookings():
     if CSV_FILE.exists():
         df = pd.read_csv(CSV_FILE)
-        df["Appointment Date"] = pd.to_datetime(df["Appointment Date"], errors="coerce")
     else:
-        df = pd.DataFrame(columns=["Patient Name", "Appointment Date", "Appointment Time (manual)", "Payment"])
+        df = pd.DataFrame(columns=[
+            "Patient Name", "Appointment Date", "Appointment Time (manual)", "Payment"
+        ])
         df.to_csv(CSV_FILE, index=False)
     return df
 
-def append_booking(rec: dict):
-    """Append a new booking to CSV."""
-    df = load_bookings()
-    df = pd.concat([df, pd.DataFrame([rec])], ignore_index=True)
+def save_bookings(df):
     df.to_csv(CSV_FILE, index=False)
 
 # ---------- Safe rerun helper ----------
 def safe_rerun():
-    if hasattr(st, "experimental_rerun"):
-        st.experimental_rerun()
-    elif hasattr(st, "rerun"):
+    if hasattr(st, "rerun"):
         st.rerun()
     else:
         st.stop()
 
-# ---------- Tabs for Appointments ----------
+# ---------- Streamlit Page Setup ----------
+st.set_page_config(page_title="Global Eye Center (Appointments)", layout="wide")
+st.title("Global Eye Center (Appointments)")
+
+# ---------- Main Tabs ----------
 tabs = st.tabs(["📌 Upcoming Appointments", "📂 Appointment Archive"])
 
-# Tab: Upcoming Appointments
-with tabs[0]:
-    bookings = load_bookings()
-    yesterday = pd.Timestamp(date.today() - timedelta(days=1))
-    upcoming = bookings[bookings["Appointment Date"] > yesterday]
+# ---------- Sidebar Form ----------
+st.sidebar.header("Add New Appointment")
+patient_name = st.sidebar.text_input("Patient Name")
+appt_date = st.sidebar.date_input("Appointment Date", value=date.today())
+appt_time = st.sidebar.text_input("Appointment Time (manual)", placeholder="HH:MM")
+payment = st.sidebar.text_input("Payment", placeholder="e.g., Cash / Card / None")
 
+if st.sidebar.button("💾 Save Appointment"):
+    if not patient_name:
+        st.sidebar.error("Patient Name is required.")
+    elif not appt_time:
+        st.sidebar.error("Appointment Time is required.")
+    else:
+        df = load_bookings()
+        new_record = {
+            "Patient Name": patient_name.strip(),
+            "Appointment Date": appt_date.strftime("%Y-%m-%d"),
+            "Appointment Time (manual)": appt_time.strip(),
+            "Payment": payment.strip()
+        }
+        df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
+        save_bookings(df)
+        st.sidebar.success("Appointment saved successfully.")
+        safe_rerun()
+
+# ---------- Load Bookings ----------
+bookings = load_bookings()
+bookings["Appointment Date"] = pd.to_datetime(bookings["Appointment Date"], errors="coerce")
+yesterday = pd.Timestamp(date.today() - timedelta(days=1))
+
+# ---------- Upcoming Tab ----------
+with tabs[0]:
+    upcoming = bookings[bookings["Appointment Date"] > yesterday]
     st.subheader("📌 Upcoming Appointments")
     if upcoming.empty:
         st.info("No upcoming appointments.")
     else:
-        disp = upcoming.sort_values("Appointment Date", ascending=False)
-        for d in disp["Appointment Date"].dt.date.unique():
-            day_df = disp[disp["Appointment Date"].dt.date == d]
+        upcoming_disp = upcoming.sort_values("Appointment Date")
+        for d in upcoming_disp["Appointment Date"].dt.date.unique():
+            day_df = upcoming_disp[upcoming_disp["Appointment Date"].dt.date == d]
             with st.expander(d.strftime("📅 %A, %d %B %Y")):
-                day_disp = day_df[["Patient Name", "Appointment Time (manual)", "Payment"]].reset_index(drop=True)
-                day_disp.index = range(1, len(day_disp)+1)
-                st.dataframe(day_disp, use_container_width=True)
+                day_df_display = day_df[["Patient Name", "Appointment Time (manual)", "Payment"]].reset_index(drop=True)
+                day_df_display.index = range(1, len(day_df_display)+1)
+                st.dataframe(day_df_display, use_container_width=True)
 
-# Tab: Archived Appointments
+# ---------- Archive Tab ----------
 with tabs[1]:
-    bookings = load_bookings()
     archive = bookings[bookings["Appointment Date"] <= yesterday]
-
     st.subheader("📂 Appointment Archive")
     if archive.empty:
         st.info("No archived appointments.")
     else:
-        disp = archive.sort_values("Appointment Date", ascending=False).reset_index(drop=True)
-        disp.index += 1
-        st.dataframe(disp[["Appointment Date", "Patient Name", "Appointment Time (manual)", "Payment"]], use_container_width=True)
-
-# ---------- Sidebar: Add Appointment ----------
-st.sidebar.header("Add Appointment")
-picked_date = st.sidebar.date_input("Appointment Date", value=date.today())
-appt_name = st.sidebar.text_input("Patient Name")
-appt_time = st.sidebar.text_input("Appointment Time (manual)")
-payment = st.sidebar.text_input("Payment (optional)")
-
-if st.sidebar.button("💾 Save Appointment"):
-    if not appt_name:
-        st.sidebar.error("Patient name required.")
-    elif not appt_time:
-        st.sidebar.error("Appointment time required.")
-    else:
-        record = {
-            "Patient Name": appt_name.strip(),
-            "Appointment Date": picked_date.isoformat(),
-            "Appointment Time (manual)": appt_time.strip(),
-            "Payment": payment.strip()
-        }
-        append_booking(record)
-        st.sidebar.success("Appointment saved successfully.")
-        safe_rerun()
+        archive_disp = archive.sort_values("Appointment Date", ascending=False).reset_index(drop=True)
+        archive_disp.index += 1
+        st.dataframe(archive_disp[["Patient Name", "Appointment Date", "Appointment Time (manual)", "Payment"]],
+                     use_container_width=True)
