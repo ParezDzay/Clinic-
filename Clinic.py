@@ -1,30 +1,57 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
-import os
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import date, datetime
+from pathlib import Path
 
-# CSV file path (relative to app folder)
-CSV_FILE = "kawa clinic.csv"
+# ---------- Streamlit Config ----------
+st.set_page_config(page_title="Kawa Clinic Appointments", layout="wide")
+st.title("📅 Kawa Clinic - Appointment Records")
+
+# ---------- Google Sheets Setup ----------
+SHEET_ID = "1keLx7iBH92_uKxj-Z70iTmAVus7X9jxaFXl_SQ-mZvU"
+
+@st.cache_resource
+def get_sheet():
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=scope
+    )
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SHEET_ID).sheet1
+    # If sheet is empty, initialize headers
+    if sheet.row_count == 0:
+        sheet.append_row(["Appt_Date", "Patient_Name", "Appt_Time", "Payment"])
+    return sheet
+
+sheet = get_sheet()
 
 # ---------- Data Functions ----------
 def load_bookings() -> pd.DataFrame:
     """
-    Load bookings from CSV. If file does not exist, create it.
+    Load appointments from Google Sheet into DataFrame
     """
-    if not os.path.exists(CSV_FILE):
-        df = pd.DataFrame(columns=["Appt_Date","Patient_Name","Appt_Time","Payment"])
-        df.to_csv(CSV_FILE, index=False)
-    df = pd.read_csv(CSV_FILE)
-    if "Appt_Date" in df.columns:
+    records = sheet.get_all_records()
+    df = pd.DataFrame(records)
+    expected_cols = ["Appt_Date", "Patient_Name", "Appt_Time", "Payment"]
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = ""
+    df = df[expected_cols]
+    if not df.empty:
         df["Appt_Date"] = pd.to_datetime(df["Appt_Date"], errors="coerce")
-    else:
-        df["Appt_Date"] = pd.NaT
     return df
 
 def append_booking(rec: dict):
-    df = load_bookings()
-    df = pd.concat([df, pd.DataFrame([rec])], ignore_index=True)
-    df.to_csv(CSV_FILE, index=False)
+    """
+    Append one new appointment to Google Sheet
+    """
+    sheet.append_row([rec["Appt_Date"], rec["Patient_Name"], rec["Appt_Time"], rec["Payment"]],
+                     value_input_option="USER_ENTERED")
 
 # ---------- Check overlap ----------
 def check_overlap(df: pd.DataFrame, appt_date: date, appt_time: str) -> bool:
@@ -33,7 +60,7 @@ def check_overlap(df: pd.DataFrame, appt_date: date, appt_time: str) -> bool:
     mask = (df["Appt_Date"].dt.date == appt_date) & (df["Appt_Time"] == appt_time)
     return mask.any()
 
-# ---------- Safe rerun helper ----------
+# ---------- Safe rerun ----------
 def safe_rerun():
     if hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
@@ -41,10 +68,6 @@ def safe_rerun():
         st.rerun()
     else:
         st.stop()
-
-# ---------- Streamlit Config ----------
-st.set_page_config(page_title="Kawa Clinic Appointments", layout="wide")
-st.title("📅 Kawa Clinic - Appointment Records")
 
 # ---------- Sidebar: Add Appointment ----------
 st.sidebar.header("Add Appointment")
